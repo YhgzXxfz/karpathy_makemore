@@ -1,3 +1,5 @@
+import os
+import pathlib
 from typing import List
 
 import torch
@@ -16,8 +18,8 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
 
 # load corpse
-# curl https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt -o input.txt
-with open("input.txt", "r", encoding="utf-8") as f:
+# wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
+with open(os.path.join(pathlib.Path(__file__).parent.resolve(), "input.txt"), "r", encoding="utf-8") as f:
     text = f.read()
 
 vocab = sorted(list(set(text)))
