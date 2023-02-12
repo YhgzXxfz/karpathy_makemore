@@ -16,6 +16,7 @@ eval_interval = 300
 learning_rate = 1e-2
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
+n_embed = 32
 
 # load corpse
 # wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
@@ -69,13 +70,15 @@ def estimate_loss():
 
 # model
 class BiGramLanguageModel(nn.Module):
-    def __init__(self, vocab_size) -> None:
+    def __init__(self) -> None:
         super().__init__()
 
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
+        self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
-        logits = self.token_embedding_table(idx)  # logits is (B, T, C)
+        tok_emb = self.token_embedding_table(idx)  # logits is (B, T, C)
+        logits = self.lm_head(tok_emb)  # (B, T, vocab_size)
 
         if targets is None:
             loss = None
@@ -97,7 +100,7 @@ class BiGramLanguageModel(nn.Module):
         return idx
 
 
-model = BiGramLanguageModel(vocab_size=vocab_size).to(device)
+model = BiGramLanguageModel().to(device)
 
 # Training
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
