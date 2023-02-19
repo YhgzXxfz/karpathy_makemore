@@ -11,9 +11,9 @@ torch.manual_seed(1337)
 # hyperparameters
 batch_size = 32
 block_size = 8
-max_iters = 3000
-eval_interval = 300
-learning_rate = 1e-2
+max_iters = 5000
+eval_interval = 500
+learning_rate = 1e-3
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 eval_iters = 200
 n_embed = 32
@@ -68,6 +68,29 @@ def estimate_loss():
     return output
 
 
+class Head(nn.Module):
+    def __init__(self, head_size) -> None:
+        super().__init__()
+        self.key = nn.Linear(n_embed, head_size, bias=False)
+        self.query = nn.Linear(n_embed, head_size, bias=False)
+        self.value = nn.Linear(n_embed, head_size, bias=False)
+        self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size)))
+
+    def forward(self, x):
+        B, T, C = x.shape
+
+        k = self.key(x)
+        q = self.query(x)
+
+        wei = q @ k.transpose(-2, -1) * C**-0.5
+        wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))
+        wei = F.softmax(wei, dim=-1)
+
+        v = self.value(x)
+        out = wei @ v
+        return out
+
+
 # model
 class BiGramLanguageModel(nn.Module):
     def __init__(self) -> None:
@@ -76,6 +99,7 @@ class BiGramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
         self.lm_head = nn.Linear(n_embed, vocab_size)
+        self.sa_head = Head(n_embed)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
         B, T = idx.shape
@@ -83,6 +107,7 @@ class BiGramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)  # logits is (B, T, C)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))  # (T, C)
         x = tok_emb + pos_emb  # (B, T, C)
+        x = self.sa_head(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:
@@ -96,7 +121,8 @@ class BiGramLanguageModel(nn.Module):
 
     def generate(self, idx, num_examples):
         for _ in range(num_examples):
-            logits, _ = self(idx)
+            idx_cond = idx[:, -block_size:]
+            logits, _ = self(idx_cond)
             logits = logits[:, -1, :]  # (B, C). Only needs the last result of block_size (T)
             probs = F.softmax(logits, dim=-1)  # (B, C). Softmax on dimension C
             idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
