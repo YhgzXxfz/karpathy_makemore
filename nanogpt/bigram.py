@@ -91,6 +91,15 @@ class Head(nn.Module):
         return out
 
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads, head_size) -> None:
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+
+    def forward(self, x):
+        return torch.cat([h(x) for h in self.heads], dim=-1)
+
+
 # model
 class BiGramLanguageModel(nn.Module):
     def __init__(self) -> None:
@@ -98,8 +107,8 @@ class BiGramLanguageModel(nn.Module):
 
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
+        self.sa_head = MultiHeadAttention(num_heads=4, head_size=n_embed // 4)
         self.lm_head = nn.Linear(n_embed, vocab_size)
-        self.sa_head = Head(n_embed)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
         B, T = idx.shape
