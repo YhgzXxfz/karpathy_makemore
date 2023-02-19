@@ -109,6 +109,19 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 
+class Block(nn.Module):
+    def __init__(self, n_embed, head_size) -> None:
+        super().__init__()
+        num_heads = n_embed // head_size
+        self.sa = MultiHeadAttention(num_heads=num_heads, head_size=head_size)
+        self.ffw = FeedForward(n_embed=n_embed)
+
+    def forward(self, x):
+        x = self.sa(x)
+        x = self.ffw(x)
+        return x
+
+
 # model
 class BiGramLanguageModel(nn.Module):
     def __init__(self) -> None:
@@ -116,8 +129,11 @@ class BiGramLanguageModel(nn.Module):
 
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
-        self.sa_head = MultiHeadAttention(num_heads=4, head_size=n_embed // 4)
-        self.ffw = FeedForward(n_embed)
+        self.blocks = nn.Sequential(
+            Block(n_embed=n_embed, head_size=4),
+            Block(n_embed=n_embed, head_size=4),
+            Block(n_embed=n_embed, head_size=4),
+        )
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
@@ -126,8 +142,7 @@ class BiGramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)  # logits is (B, T, C)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))  # (T, C)
         x = tok_emb + pos_emb  # (B, T, C)
-        x = self.sa_head(x)
-        x = self.ffw(x)
+        x = self.blocks(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:
