@@ -118,10 +118,12 @@ class Block(nn.Module):
         num_heads = n_embed // head_size
         self.sa = MultiHeadAttention(num_heads=num_heads, head_size=head_size)
         self.ffw = FeedForward(n_embed=n_embed)
+        self.ln1 = nn.LayerNorm(n_embed)
+        self.ln2 = nn.LayerNorm(n_embed)
 
     def forward(self, x):
-        x = x + self.sa(x)
-        x = x + self.ffw(x)
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffw(self.ln2(x))
         return x
 
 
@@ -136,6 +138,7 @@ class BiGramLanguageModel(nn.Module):
             Block(n_embed=n_embed, head_size=4),
             Block(n_embed=n_embed, head_size=4),
             Block(n_embed=n_embed, head_size=4),
+            nn.LayerNorm(n_embed),
         )
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
