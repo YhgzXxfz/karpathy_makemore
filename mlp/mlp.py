@@ -39,6 +39,7 @@ class MLP(nn.Module):
         logits = h @ self.W2 + self.b2  # (32, 27)
         return logits
 
+    @torch.no_grad()
     def generate(self, num_examples: int, seed):
         g = torch.Generator().manual_seed(seed)
         outputs = []
@@ -62,6 +63,7 @@ class MLP(nn.Module):
         return outputs
 
 
+@torch.no_grad()
 def evaluate(model: nn.Module, inputs: torch.Tensor, labels: torch.Tensor) -> float:
     logits = model.forward(inputs)
     loss = F.cross_entropy(logits, labels, reduction="mean")
