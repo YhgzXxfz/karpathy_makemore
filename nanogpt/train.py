@@ -6,7 +6,7 @@ import typing as tp
 import torch
 import torch.nn as nn
 
-from nanogpt.bigram import BiGramLanguageModel
+from nanogpt.bigram import BiGramLanguageModel, BiGramWithPositionEmbeddingLanguageModel
 
 
 def encode(s: str, stoi: tp.Dict) -> tp.List[int]:
@@ -108,7 +108,9 @@ def main():
 
     torch.manual_seed(1337)
     device = "cuda:0" if args.cuda and torch.cuda.is_available() else "cpu"
-    model = BiGramLanguageModel(vocab_size=vocab_size, n_embed=args.n_embed).to(device)
+    model = BiGramWithPositionEmbeddingLanguageModel(
+        vocab_size=vocab_size, n_embed=args.n_embed, block_size=args.block_size
+    ).to(device)
 
     # Training
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
