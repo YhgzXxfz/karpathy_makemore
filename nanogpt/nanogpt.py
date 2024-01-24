@@ -2,26 +2,28 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nanogpt.attention import MultiHeadAttentionWithResidualConnection
+from nanogpt.attention import MultiHeadAttentionWithResidualConnectionAndDropout
 
 
 class FeedForward(nn.Module):
-    def __init__(self, n_embed: int) -> None:
+    def __init__(self, n_embed: int, dropout: float) -> None:
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(n_embed, 4 * n_embed), nn.ReLU(), nn.Linear(4 * n_embed, n_embed))
+        self.net = nn.Sequential(
+            nn.Linear(n_embed, 4 * n_embed), nn.ReLU(), nn.Linear(4 * n_embed, n_embed), nn.Dropout(dropout)
+        )
 
     def forward(self, x):
         return self.net(x)
 
 
 class Block(nn.Module):
-    def __init__(self, num_heads: int, head_size: int, n_embed: int, block_size: int) -> None:
+    def __init__(self, num_heads: int, head_size: int, n_embed: int, block_size: int, dropout: float) -> None:
         super().__init__()
         assert head_size == n_embed // num_heads, "We use n_embed as sum of head_sizes for now."
-        self.sa = MultiHeadAttentionWithResidualConnection(
-            num_heads=num_heads, head_size=head_size, n_embed=n_embed, block_size=block_size
+        self.sa = MultiHeadAttentionWithResidualConnectionAndDropout(
+            num_heads=num_heads, head_size=head_size, n_embed=n_embed, block_size=block_size, dropout=dropout
         )
-        self.ffwd = FeedForward(n_embed)
+        self.ffwd = FeedForward(n_embed, dropout)
 
         self.ln1 = nn.LayerNorm(n_embed)
         self.ln2 = nn.LayerNorm(n_embed)
@@ -33,7 +35,9 @@ class Block(nn.Module):
 
 
 class GPT(nn.Module):
-    def __init__(self, num_heads: int, vocab_size: int, n_embed: int, block_size: int, n_layers: int) -> None:
+    def __init__(
+        self, num_heads: int, vocab_size: int, n_embed: int, block_size: int, n_layers: int, dropout: float
+    ) -> None:
         super().__init__()
 
         self.block_size = block_size
@@ -41,7 +45,13 @@ class GPT(nn.Module):
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
         self.blocks = nn.Sequential(
             *[
-                Block(num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size)
+                Block(
+                    num_heads=num_heads,
+                    head_size=n_embed // num_heads,
+                    n_embed=n_embed,
+                    block_size=block_size,
+                    dropout=dropout,
+                )
                 for _ in range(n_layers)
             ]
         )

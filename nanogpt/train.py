@@ -92,6 +92,7 @@ def main():
     parser.add_argument("--n_embed", type=int, default=32, help="Number embedding dimension.")
     parser.add_argument("--num_heads", type=int, default=4, help="Number of self-attention heads.")
     parser.add_argument("--n_layers", type=int, default=3, help="Number of self-attention blocks.")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout ratio.")
     parser.add_argument("--cuda", action="store_true", help="If True, use GPU for training.")
 
     args = parser.parse_args()
@@ -116,8 +117,11 @@ def main():
         "n_embed": args.n_embed,
         "block_size": args.block_size,
         "n_layers": args.n_layers,
+        "dropout": args.dropout,
     }
     model = GPT(**kwargs).to(device)
+
+    print(f"Number of params: {sum(p.numel() for p in model.parameters()) / 1e6} MB.")
 
     # Training
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
