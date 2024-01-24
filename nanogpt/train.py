@@ -94,6 +94,8 @@ def main():
     parser.add_argument("--n_layers", type=int, default=3, help="Number of self-attention blocks.")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout ratio.")
     parser.add_argument("--cuda", action="store_true", help="If True, use GPU for training.")
+    parser.add_argument("--output_len", type=int, default=500, help="Number of tokens to generate.")
+    parser.add_argument("--output_path", type=str, default="./output.txt", help="Path to output inference.")
 
     args = parser.parse_args()
 
@@ -139,7 +141,9 @@ def main():
 
     # Inference
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
-    print(decode(model.generate(context, max_new_tokens=500)[0].tolist(), itos))
+    output = decode(model.generate(context, max_new_tokens=args.output_len)[0].tolist(), itos)
+    with open(args.output_path, "w") as fp:
+        fp.write(output)
 
 
 if __name__ == "__main__":
