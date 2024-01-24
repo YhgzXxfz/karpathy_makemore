@@ -2,61 +2,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nanogpt.models.attention import MultiHeadAttentionWithResidualConnectionAndDropout
+from nanogpt.models.attention import MultiHeadAttentionWithResidualConnection
 
 
-class FeedForward(nn.Module):
-    def __init__(self, n_embed: int, dropout: float) -> None:
+class FeedForwardWithResidualConnection(nn.Module):
+    def __init__(self, n_embed: int) -> None:
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_embed, 4 * n_embed), nn.ReLU(), nn.Linear(4 * n_embed, n_embed), nn.Dropout(dropout)
-        )
+        self.net = nn.Sequential(nn.Linear(n_embed, 4 * n_embed), nn.ReLU(), nn.Linear(4 * n_embed, n_embed))
 
     def forward(self, x):
         return self.net(x)
 
 
-class Block(nn.Module):
-    def __init__(self, num_heads: int, head_size: int, n_embed: int, block_size: int, dropout: float) -> None:
+class BlockWithResidualConnection(nn.Module):
+    def __init__(self, num_heads: int, head_size: int, n_embed: int, block_size: int) -> None:
         super().__init__()
         assert head_size == n_embed // num_heads, "We use n_embed as sum of head_sizes for now."
-        self.sa = MultiHeadAttentionWithResidualConnectionAndDropout(
-            num_heads=num_heads, head_size=head_size, n_embed=n_embed, block_size=block_size, dropout=dropout
+        self.sa = MultiHeadAttentionWithResidualConnection(
+            num_heads=num_heads, head_size=head_size, n_embed=n_embed, block_size=block_size
         )
-        self.ffwd = FeedForward(n_embed, dropout)
-
-        self.ln1 = nn.LayerNorm(n_embed)
-        self.ln2 = nn.LayerNorm(n_embed)
+        self.ffwd = FeedForwardWithResidualConnection(n_embed)
 
     def forward(self, x):
-        x = x + self.sa(self.ln1(x))
-        x = x + self.ffwd(self.ln2(x))
+        x = x + self.sa(x)
+        x = x + self.ffwd(x)
         return x
 
 
-class GPT(nn.Module):
-    def __init__(
-        self, num_heads: int, vocab_size: int, n_embed: int, block_size: int, n_layers: int, dropout: float
-    ) -> None:
+class TransformerWithBlocksAndResidualConnection(nn.Module):
+    def __init__(self, num_heads: int, vocab_size: int, n_embed: int, block_size: int) -> None:
         super().__init__()
 
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
         self.blocks = nn.Sequential(
-            *[
-                Block(
-                    num_heads=num_heads,
-                    head_size=n_embed // num_heads,
-                    n_embed=n_embed,
-                    block_size=block_size,
-                    dropout=dropout,
-                )
-                for _ in range(n_layers)
-            ]
+            BlockWithResidualConnection(
+                num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size
+            ),
+            BlockWithResidualConnection(
+                num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size
+            ),
+            BlockWithResidualConnection(
+                num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size
+            ),
         )
 
-        self.ln_f = nn.LayerNorm(n_embed)  # final layer norm
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
@@ -66,7 +57,6 @@ class GPT(nn.Module):
         pos_emb = self.position_embedding_table(torch.arange(T))
         x = tok_emb + pos_emb  # (B, T, C) + (T, C) => (B, T, C)
         x = self.blocks(x)  # (B, T, head_size == C)
-        x = self.ln_f(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:

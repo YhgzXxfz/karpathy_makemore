@@ -2,44 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nanogpt.attention import MultiHeadAttention
+from nanogpt.models.attention import Head, MultiHeadAttention
 
 
-class FeedForward(nn.Module):
-    def __init__(self, n_embed: int) -> None:
-        super().__init__()
-        self.net = nn.Sequential(nn.Linear(n_embed, n_embed), nn.ReLU())
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class Block(nn.Module):
-    def __init__(self, num_heads: int, head_size: int, n_embed: int, block_size: int) -> None:
-        super().__init__()
-        assert head_size == n_embed // num_heads, "We use n_embed as sum of head_sizes for now."
-        self.sa = MultiHeadAttention(num_heads=num_heads, head_size=head_size, n_embed=n_embed, block_size=block_size)
-        self.ffwd = FeedForward(n_embed)
-
-    def forward(self, x):
-        x = self.sa(x)
-        x = self.ffwd(x)
-        return x
-
-
-class TransformerWithMultiAttentionAndFeedForward(nn.Module):
-    def __init__(self, num_heads: int, vocab_size: int, n_embed: int, block_size: int) -> None:
+class TransformerWithSelfAttentionLanguageModel(nn.Module):
+    def __init__(self, vocab_size: int, n_embed: int, block_size: int) -> None:
         super().__init__()
 
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
-        self.sa_head = MultiHeadAttention(
-            num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size
-        )  # We want the total length of concatenated heads (along the C dimension) to be the same as Single Head.
-        # - (which is n_embed in our setting)
-
-        self.ffwd = FeedForward(n_embed)
+        self.sa_head = Head(
+            head_size=n_embed, n_embed=n_embed, block_size=block_size
+        )  # Let's use n_embed as head_size for now.
 
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
@@ -50,7 +25,6 @@ class TransformerWithMultiAttentionAndFeedForward(nn.Module):
         pos_emb = self.position_embedding_table(torch.arange(T))
         x = tok_emb + pos_emb  # (B, T, C) + (T, C) => (B, T, C)
         x = self.sa_head(x)  # (B, T, head_size == C)
-        x = self.ffwd(x)
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:
@@ -73,18 +47,17 @@ class TransformerWithMultiAttentionAndFeedForward(nn.Module):
         return idx
 
 
-class TransformerWithBlocksOfMultiAttentionAndFeedForward(nn.Module):
+class TransformerWithMultiAttentionLanguageModel(nn.Module):
     def __init__(self, num_heads: int, vocab_size: int, n_embed: int, block_size: int) -> None:
         super().__init__()
 
         self.block_size = block_size
         self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
         self.position_embedding_table = nn.Embedding(block_size, n_embed)
-        self.blocks = nn.Sequential(
-            Block(num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size),
-            Block(num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size),
-            Block(num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size),
-        )
+        self.sa_head = MultiHeadAttention(
+            num_heads=num_heads, head_size=n_embed // num_heads, n_embed=n_embed, block_size=block_size
+        )  # We want the total length of concatenated heads (along the C dimension) to be the same as Single Head.
+        # - (which is n_embed in our setting)
 
         self.lm_head = nn.Linear(n_embed, vocab_size)
 
@@ -94,7 +67,7 @@ class TransformerWithBlocksOfMultiAttentionAndFeedForward(nn.Module):
         tok_emb = self.token_embedding_table(idx)  # (B, T, C), C is n_embed
         pos_emb = self.position_embedding_table(torch.arange(T))
         x = tok_emb + pos_emb  # (B, T, C) + (T, C) => (B, T, C)
-        x = self.blocks(x)  # (B, T, head_size == C)
+        x = self.sa_head(x)  # (B, T, head_size == C)
         logits = self.lm_head(x)  # (B, T, vocab_size)
 
         if targets is None:
