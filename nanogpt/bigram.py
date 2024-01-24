@@ -4,10 +4,10 @@ import torch.nn.functional as F
 
 
 class BiGramLanguageModel(nn.Module):
-    def __init__(self, vocab_size: int, n_embed: int) -> None:
+    def __init__(self, vocab_size: int) -> None:
         super().__init__()
 
-        self.token_embedding_table = nn.Embedding(vocab_size, n_embed)
+        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
 
     def forward(self, idx, targets=None):  # idx is (B, T)
         B, T = idx.shape
