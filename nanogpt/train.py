@@ -6,7 +6,7 @@ import typing as tp
 import torch
 import torch.nn as nn
 
-from nanogpt.bigram import BiGramLanguageModel, BiGramWithPositionEmbeddingLanguageModel
+from nanogpt.nanogpt import GPT
 
 
 def encode(s: str, stoi: tp.Dict) -> tp.List[int]:
@@ -17,7 +17,7 @@ def decode(lst: tp.List[int], itos: tp.Dict) -> str:
     return "".join(itos[i] for i in lst)
 
 
-def create_data(text: str, stoi: tp.Dict, itos: tp.Dict) -> tp.Dict:
+def create_data(text: str, stoi: tp.Dict) -> tp.Dict:
     data = torch.tensor(encode(text, stoi), dtype=torch.long)
     n = int(0.9 * len(data))
     train_data = data[:n]
@@ -89,7 +89,9 @@ def main():
     )
     parser.add_argument("--learning_rate", type=float, default=1e-2, help="Learning Rate.")
     parser.add_argument("--eval_epochs", type=int, default=200, help="Number of epochs to evaluate.")
-    parser.add_argument("--n_embed", type=int, default=65, help="Number embedding dimension.")
+    parser.add_argument("--n_embed", type=int, default=32, help="Number embedding dimension.")
+    parser.add_argument("--num_heads", type=int, default=4, help="Number of self-attention heads.")
+    parser.add_argument("--n_layers", type=int, default=3, help="Number of self-attention blocks.")
     parser.add_argument("--cuda", action="store_true", help="If True, use GPU for training.")
 
     args = parser.parse_args()
@@ -104,13 +106,18 @@ def main():
     vocab_size = len(vocab)
     stoi = {ch: i for i, ch in enumerate(vocab)}
     itos = {i: ch for i, ch in enumerate(vocab)}
-    data = create_data(text, stoi, itos)
+    data = create_data(text, stoi)
 
     torch.manual_seed(1337)
     device = "cuda:0" if args.cuda and torch.cuda.is_available() else "cpu"
-    model = BiGramWithPositionEmbeddingLanguageModel(
-        vocab_size=vocab_size, n_embed=args.n_embed, block_size=args.block_size
-    ).to(device)
+    kwargs = {
+        "num_heads": args.num_heads,
+        "vocab_size": vocab_size,
+        "n_embed": args.n_embed,
+        "block_size": args.block_size,
+        "n_layers": args.n_layers,
+    }
+    model = GPT(**kwargs).to(device)
 
     # Training
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
