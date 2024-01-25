@@ -1,11 +1,13 @@
 import argparse
 import os
 import pathlib
+import time
 import typing as tp
 
 import torch
 import torch.nn as nn
 
+import wandb
 from nanogpt.nanogpt import GPT
 
 
@@ -52,22 +54,63 @@ def estimate_loss(
     return output
 
 
-def train(
-    model: nn.Module,
-    optimizer,
-    epochs: int,
-    eval_interval: int,
-    eval_epochs: int,
-    data: torch.Tensor,
-    block_size: int,
-    batch_size: int,
-    device: torch.device,
-) -> None:
-    for iter in range(epochs):
-        if iter % eval_interval == 0:
-            losses = estimate_loss(model, eval_epochs, data, block_size, batch_size, device)
-            print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-        xb, yb = get_batch(data, "train", block_size, batch_size, device)
+def init_wandb(args):
+    assert (
+        args.wandb_base_url is not None
+        or args.wandb_api_key is not None
+        or args.wandb_entity is not None
+        or args.wandb_project is not None
+    )
+
+    os.environ["WANDB_BASE_URL"] = args.wandb_base_url
+    os.environ["WANDB_API_KEY"] = args.wandb_api_key
+    os.environ["WANDB_START_METHOD"] = "thread"
+    wandb.init(
+        project=args.wandb_project,
+        entity=args.wandb_entity,
+        config=args,
+        name="gpt2",
+    )
+
+
+def train(model: nn.Module, optimizer, data: torch.Tensor, device: torch.device, model_args: tp.Dict, args) -> None:
+    t0 = time.time()
+    best_val_loss = 1e9
+
+    if args.wandb_log:
+        init_wandb(args)
+
+    for iter_num in range(args.epochs):
+        if iter_num % args.eval_interval == 0:
+            losses = estimate_loss(model, args.eval_epochs, data, args.block_size, args.batch_size, device)
+            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+            if args.wandb_log:
+                wandb.log(
+                    {
+                        "iter": iter_num,
+                        "train/loss": losses["train"],
+                        "val/loss": losses["val"],
+                        "lr": args.learning_rate,
+                    }
+                )
+            if losses["val"] < best_val_loss and args.output_dir:
+                best_val_loss = losses["val"]
+                if iter_num > 0:
+                    checkpoint = {
+                        "model": model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "model_args": model_args,
+                        "iter_num": iter_num,
+                        "best_val_loss": best_val_loss,
+                    }
+                    print(f"saving checkpoint to {args.output_dir}")
+                    os.makedirs(args.output_dir, exist_ok=True)
+                    torch.save(checkpoint, os.path.join(args.output_dir, "ckpt.pt"))
+
+        if iter_num == 0 and args.eval_only:
+            break
+
+        xb, yb = get_batch(data, "train", args.block_size, args.batch_size, device)
 
         logits, loss = model(xb, yb)
         optimizer.zero_grad(set_to_none=True)
@@ -75,27 +118,46 @@ def train(
         loss.backward()
         optimizer.step()
 
+        if iter_num % args.log_interval == 0:
+            t1 = time.time()
+            dt = t1 - t0
+            t0 = t1
+            print(f"iter {iter_num}: time {dt*1000:.2f}ms")
+
 
 def main():
     parser = argparse.ArgumentParser(description="BiGram Training Scripts.")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch Size for training.")
     parser.add_argument("--block_size", type=int, default=8, help="Context Length of Sequence.")
     parser.add_argument("--epochs", type=int, default=3000, help="Number of iterations of training.")
+    parser.add_argument("--learning_rate", type=float, default=1e-2, help="Learning Rate.")
+    parser.add_argument("--n_embed", type=int, default=32, help="Number embedding dimension.")
+    parser.add_argument("--num_heads", type=int, default=4, help="Number of self-attention heads.")
+    parser.add_argument("--n_layers", type=int, default=3, help="Number of self-attention blocks.")
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout ratio.")
+    parser.add_argument("--cuda", action="store_true", help="If True, use GPU for training.")
+
+    # Evaluation
     parser.add_argument(
         "--eval_interval",
         type=int,
         default=500,
         help="Interval of loss evaluation (both train and val).",
     )
-    parser.add_argument("--learning_rate", type=float, default=1e-2, help="Learning Rate.")
     parser.add_argument("--eval_epochs", type=int, default=200, help="Number of epochs to evaluate.")
-    parser.add_argument("--n_embed", type=int, default=32, help="Number embedding dimension.")
-    parser.add_argument("--num_heads", type=int, default=4, help="Number of self-attention heads.")
-    parser.add_argument("--n_layers", type=int, default=3, help="Number of self-attention blocks.")
-    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout ratio.")
-    parser.add_argument("--cuda", action="store_true", help="If True, use GPU for training.")
+    parser.add_argument("--eval_only", action="store_true", help="If True, only evaluate the model.")
+
+    # Logging
+    parser.add_argument("--log_interval", type=int, default=200, help="Interval to log.")
+    parser.add_argument("--wandb_log", action="store_true", help="If True, log to wandb.")
+    parser.add_argument("--wandb_base_url", type=str, help="Wandb base url.")
+    parser.add_argument("--wandb_api_key", type=str, help="Wandb API key.")
+    parser.add_argument("--wandb_entity", type=str, help="Wandb Entity.")
+    parser.add_argument("--wandb_project", type=str, help="Wandb Project.")
+
+    # Inference
     parser.add_argument("--output_len", type=int, default=500, help="Number of tokens to generate.")
-    parser.add_argument("--output_path", type=str, default="./output.txt", help="Path to output inference.")
+    parser.add_argument("--output_dir", type=str, help="Path to inference output.")
 
     args = parser.parse_args()
 
@@ -127,23 +189,17 @@ def main():
 
     # Training
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    train(
-        model,
-        optimizer,
-        args.epochs,
-        eval_interval=args.eval_interval,
-        eval_epochs=args.eval_epochs,
-        data=data,
-        block_size=args.block_size,
-        batch_size=args.batch_size,
-        device=device,
-    )
+    train(model, optimizer, data=data, device=device, model_args=kwargs, args=args)
 
     # Inference
     context = torch.zeros((1, 1), dtype=torch.long, device=device)
     output = decode(model.generate(context, max_new_tokens=args.output_len)[0].tolist(), itos)
-    with open(args.output_path, "w") as fp:
-        fp.write(output)
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        with open(os.path.join(args.output_dir, "inference.txt"), "w") as fp:
+            fp.write(output)
+    else:
+        print(output)
 
 
 if __name__ == "__main__":
